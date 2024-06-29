@@ -24,7 +24,7 @@ load_previous_npm_node_versions() {
 # on failure, this will exit non-zero
 resolve_node_version() {
   echo "Resolving node version $node_version..."
-  
+
   local base_url="https://nodejs.org/dist"
   local lookup_url=""
 
@@ -188,36 +188,39 @@ install_npm() {
 install_yarn() {
   local dir="$1"
 
-  if [ ! $yarn_version ] || is_yarn2_configured; then
-    echo "Downloading and installing yarn lastest..."
-    local download_url="https://yarnpkg.com/latest.tar.gz"
-  else
-    echo "Downloading and installing yarn $yarn_version..."
-    local download_url="https://yarnpkg.com/downloads/$yarn_version/yarn-v$yarn_version.tar.gz"
-  fi
-
-  local code=$(curl "$download_url" -L --silent --fail --retry 5 --retry-max-time 15 -o /tmp/yarn.tar.gz --write-out "%{http_code}")
-  if [ "$code" != "200" ]; then
-    echo "Unable to download yarn: $code" && false
-  fi
-  rm -rf $dir
-  mkdir -p "$dir"
-  # https://github.com/yarnpkg/yarn/issues/770
-  if tar --version | grep -q 'gnu'; then
-    tar xzf /tmp/yarn.tar.gz -C "$dir" --strip 1 --warning=no-unknown-keyword
-  else
-    tar xzf /tmp/yarn.tar.gz -C "$dir" --strip 1
-  fi
-  chmod +x $dir/bin/*
-  PATH=$dir/bin:$PATH
-  echo "Installed yarn $(yarn --version)"
-
   if is_yarn2_configured; then
-    info "Enabling corepack"
+    info "Installing yarn (corepack)"
     corepack enable
+    corepack prepare yarn@$yarn_version --activate
+
     info "Setting yarn version $yarn_version"
     yarn set version $yarn_version
+  else
+    if [ ! $yarn_version ]; then
+      echo "Installing yarn (tarball): lastest"
+      local download_url="https://yarnpkg.com/latest.tar.gz"
+    else
+      echo "Installing yarn (tarball): $yarn_version"
+      local download_url="https://yarnpkg.com/downloads/$yarn_version/yarn-v$yarn_version.tar.gz"
+    fi
+
+    local code=$(curl "$download_url" -L --silent --fail --retry 5 --retry-max-time 15 -o /tmp/yarn.tar.gz --write-out "%{http_code}")
+    if [ "$code" != "200" ]; then
+      echo "Unable to download yarn: $code" && false
+    fi
+    rm -rf $dir
+    mkdir -p "$dir"
+    # https://github.com/yarnpkg/yarn/issues/770
+    if tar --version | grep -q 'gnu'; then
+      tar xzf /tmp/yarn.tar.gz -C "$dir" --strip 1 --warning=no-unknown-keyword
+    else
+      tar xzf /tmp/yarn.tar.gz -C "$dir" --strip 1
+    fi
+    chmod +x $dir/bin/*
+    PATH=$dir/bin:$PATH
   fi
+
+  echo "Installed yarn $(yarn --version)"
 }
 
 install_and_cache_deps() {
@@ -258,7 +261,11 @@ install_npm_deps() {
 
 install_yarn_deps() {
   info "Installing packages (yarn)"
-  yarn install --check-files --cache-folder $cache_dir/yarn-cache --pure-lockfile 2>&1
+  if is_yarn2_configured; then
+    yarn install 2>&1
+  else
+    yarn install --check-files --cache-folder $cache_dir/yarn-cache --pure-lockfile 2>&1
+  fi
 }
 
 install_bower_deps() {
