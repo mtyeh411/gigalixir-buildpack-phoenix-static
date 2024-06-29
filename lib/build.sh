@@ -213,6 +213,9 @@ install_yarn() {
   echo "Installed yarn $(yarn --version)"
 
   if is_yarn2_configured; then
+    info "Enabling corepack"
+    corepack enable
+    info "Setting yarn version $yarn_version"
     yarn set version $yarn_version
   fi
 }
@@ -228,7 +231,6 @@ install_and_cache_deps() {
     fi
   fi
 
-  info "Installing node modules"
   if [ -f "$assets_dir/yarn.lock" ]; then
     mkdir -p $assets_dir/node_modules
     install_yarn_deps
@@ -247,6 +249,7 @@ install_and_cache_deps() {
 }
 
 install_npm_deps() {
+  info "Installing packages (npm)"
   npm prune | indent
   npm install --quiet --unsafe-perm --userconfig $build_dir/npmrc 2>&1 | indent
   npm rebuild 2>&1 | indent
@@ -254,6 +257,7 @@ install_npm_deps() {
 }
 
 install_yarn_deps() {
+  info "Installing packages (yarn)"
   yarn install --check-files --cache-folder $cache_dir/yarn-cache --pure-lockfile 2>&1
 }
 
