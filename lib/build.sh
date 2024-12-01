@@ -41,10 +41,15 @@ resolve_node_version() {
   esac
 
   local node_file=""
-  if node_file=$(curl --silent --get --retry 5 --retry-max-time 15 $lookup_url | grep -oE  '"node-v[0-9]+.[0-9]+.[0-9]+-linux-x64.tar.gz"')
+  if node_file=$(curl --silent --get -L --retry 5 --retry-max-time 15 $lookup_url | grep -oE  '"[^"]*node-v[0-9]+.[0-9]+.[0-9]+-linux-x64.tar.gz"')
   then
     node_version=$(echo "$node_file" | sed -E 's/.*node-v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
-    node_url="${base_url}/v${node_version}/${node_file//\"/}"
+    if echo "${node_file}" | grep -q "/"; then
+      node_file=$(echo "${node_file}" | sed -e 's/\/dist//')
+      node_url="${base_url}${node_file//\"/}"
+    else
+      node_url="${base_url}/v${node_version}/${node_file//\"/}"
+    fi
   else
     fail_bin_install node $node_version "Unable to resolve version"
   fi
@@ -55,7 +60,7 @@ resolve_node_version() {
 
   # get the corresponding checksum
   local sha_url=${lookup_url}SHASUMS256.txt
-  node_sha=$(curl --silent --get --retry 5 --retry-max-time 15 $sha_url | grep -E "node-v${node_version}-linux-x64.tar.gz" | awk '{print $1}')
+  node_sha=$(curl --silent --get -L --retry 5 --retry-max-time 15 $sha_url | grep -E "node-v${node_version}-linux-x64.tar.gz" | awk '{print $1}')
   if [ ! -z "$node_sha" ]; then
     echo "$node_sha ${cached_node}" > $cached_sha
   fi
@@ -83,6 +88,7 @@ download_node() {
     for ii in {2..0}; do
       if ! $download_complete; then
         echo "Downloading node $node_version..."
+        echo "Using ${node_url}"
         if code=$(curl "$node_url" -L --silent --fail --retry 5 --retry-max-time 15 -o ${cached_node} --write-out "%{http_code}"); then
 
           if [ "$code" == "200" ]; then
@@ -224,31 +230,34 @@ install_yarn() {
 }
 
 install_and_cache_deps() {
-  cd $assets_dir
+  if [ -d "$assets_dir" ]; then
+    cd $assets_dir
 
-  if [ -d $cache_dir/node_modules ]; then
-    info "Loading node modules from cache"
-    mkdir node_modules
-    if [ -z $(find $cache_dir/node_modules -maxdepth 0 -empty) ]; then
-      rsync -a $cache_dir/node_modules/ node_modules/
+    if [ -d $cache_dir/node_modules ]; then
+      info "Loading node modules from cache"
+      mkdir node_modules
+      if [ -z $(find $cache_dir/node_modules -maxdepth 0 -empty) ]; then
+        rsync -a $cache_dir/node_modules/ node_modules/
+      fi
     fi
+
+    info "Installing node modules"
+    if [ -f "$assets_dir/yarn.lock" ]; then
+      mkdir -p $assets_dir/node_modules
+      install_yarn_deps
+    elif [ -f "$assets_dir/package.json" ]; then
+      install_npm_deps
+    fi
+
+    if [ -d node_modules ]; then
+      info "Caching node modules"
+      cp -R node_modules $cache_dir
+    fi
+
+    PATH=$assets_dir/node_modules/.bin:$PATH
+
+    install_bower_deps
   fi
-
-  if [ -f "$assets_dir/yarn.lock" ]; then
-    mkdir -p $assets_dir/node_modules
-    install_yarn_deps
-  else
-    install_npm_deps
-  fi
-
-  if [ -d node_modules ]; then
-    info "Caching node modules"
-    cp -R node_modules $cache_dir
-  fi
-
-  PATH=$assets_dir/node_modules/.bin:$PATH
-
-  install_bower_deps
 }
 
 install_npm_deps() {
@@ -306,7 +315,9 @@ run_compile() {
     rsync -a -v --ignore-existing $cache_dir/phoenix-static/ priv/static
   fi
 
-  cd $assets_dir
+  if [ -d $assets_dir ]; then
+    cd $assets_dir
+  fi
 
   if [ -f $custom_compile ]; then
     info "Running custom compile"
@@ -360,16 +371,28 @@ fail_bin_install() {
   exit 1
 }
 
+setup_phx_envvars() {
+  info "Setting up Phoenix environment variables"
+  mkdir -p $build_dir/.profile.d
+
+  local phoenix_env_file=$build_dir/.profile.d/phoenix_static_buildpack_env.sh
+
+  echo "export PHX_SERVER=\${PHX_SERVER:-true}" >> $phoenix_env_file
+  echo "export PHX_HOST=\${PHX_HOST:=\${APP_NAME}.gigalixirapp.com}" >> $phoenix_env_file
+}
+
 is_yarn2_configured() {
   if [ ! $yarn_version ]; then
-    return $(false)
+    false
   else
     local regex='[^0-9]*\([0-9]*\)[.]\([0-9]*\)[.]\([0-9]*\)\([0-9A-Za-z-]*\)'
-    local major_version=`echo $yarn_version | sed -e "s#$regex#\1#"`
-    if [ $major_version -ge 2 ]; then
-      return $(true)
+    yarn_major_version=`echo $yarn_version | sed -e "s#$regex#\1#"`
+    echo "Resolved yarn major version: $yarn_major_version"
+
+    if [ $yarn_major_version -ge 2 ]; then
+      true
     else
-      return $(false)
+      false
     fi
   fi
 }

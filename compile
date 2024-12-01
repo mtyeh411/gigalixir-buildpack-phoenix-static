@@ -1,7 +1,13 @@
 if [ -f "$assets_dir/yarn.lock" || [ -d "$assets_dir/.yarn" ] || [ -f "$assets_dir/.pnp.*"]; then
   yarn deploy
-else
+elif [ -f "$assets_dir/package.json" ] && jq -e '.scripts.deploy' $assets_dir/package.json > /dev/null; then
   npm run deploy
+else
+  cd $phoenix_dir
+  if mix help "assets.deploy" 1>/dev/null 2>&1; then
+    mix assets.deploy 
+  fi
+  rm -f _build/esbuild
 fi
 
 cd $phoenix_dir
